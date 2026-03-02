@@ -71,6 +71,16 @@
               />
             </div>
           </div>
+          <div class="field">
+            <label for="content">测试指令（发送给 OpenClaw 的内容）</label>
+            <textarea
+              id="content"
+              v-model="form.content"
+              rows="3"
+              placeholder="例如：上海今天的天气怎么样？"
+              required
+            ></textarea>
+          </div>
           <div class="actions">
             <button type="submit" class="btn primary" :disabled="loading">
               {{ loading ? '测试中…' : '开始测试' }}
@@ -79,12 +89,66 @@
         </form>
       </section>
 
-      <section v-if="result" class="card result-card">
-        <h2>压测报告</h2>
-        <div v-if="result.success" class="success-badge">测试完成</div>
-        <div v-else class="fail-badge">测试异常</div>
+      <section class="card best-qps-card">
+        <h2>寻找最佳 QPS</h2>
+        <p class="card-desc">在 TTFT/TPOT 约束下迭代搜索最大可满足 QPS</p>
+        <div class="row">
+          <div class="field">
+            <label>TTFT 约束 (秒)</label>
+            <input v-model.number="bestQpsForm.ttft" type="number" min="0" step="0.1" />
+          </div>
+          <div class="field">
+            <label>TPOT 约束 (秒)</label>
+            <input v-model.number="bestQpsForm.tpot" type="number" min="0" step="0.01" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>初始 QPS</label>
+            <input v-model.number="bestQpsForm.qps_initial" type="number" min="0.01" step="0.1" />
+          </div>
+          <div class="field">
+            <label>最大迭代次数</label>
+            <input v-model.number="bestQpsForm.max_iter" type="number" min="1" max="50" />
+          </div>
+        </div>
+        <div class="actions">
+          <button
+            type="button"
+            class="btn primary"
+            :disabled="bestQpsLoading"
+            @click="runFindBestQps"
+          >
+            {{ bestQpsLoading ? '搜索中…' : '开始寻找最佳 QPS' }}
+          </button>
+        </div>
+        <div v-if="bestQpsLoading || bestQpsProgress" class="progress-section">
+          <div class="progress-bar">
+            <div
+              class="progress-fill"
+              :style="{ width: bestQpsProgressPercent + '%' }"
+            ></div>
+          </div>
+          <p class="progress-message">{{ bestQpsProgress?.message || '准备中…' }}</p>
+        </div>
+        <div v-if="bestQpsResult" class="best-qps-result">
+          <h3>结果</h3>
+          <p><strong>最佳 QPS：</strong>{{ bestQpsResult.best_qps?.toFixed(4) }}</p>
+          <p v-if="bestQpsResult.history?.length" class="iter-count">共 {{ bestQpsResult.history.length }} 次迭代</p>
+          <div class="report-output">
+            <h3>最后一次回显</h3>
+            <pre class="raw-pre">{{ bestQpsResult.raw_output }}</pre>
+          </div>
+        </div>
+      </section>
 
-        <div v-if="result.summary" class="summary">
+      <section v-if="streamingOutput !== null || result" class="card result-card">
+        <h2>压测报告</h2>
+        <div v-if="loading" class="streaming-badge">流式输出中…</div>
+        <div v-else-if="result?.success" class="success-badge">测试完成</div>
+        <div v-else-if="result && !result.success" class="fail-badge">测试异常</div>
+
+        <div v-if="result?.summary" class="summary">
           <h3>关键指标</h3>
           <table class="metrics-table">
             <tbody>
@@ -99,16 +163,37 @@
           </table>
         </div>
 
-        <div class="raw-output">
-          <h3>原始输出</h3>
-          <pre>{{ result.raw_output }}</pre>
+        <div class="report-output">
+          <div class="report-header">
+            <h3>测试报告</h3>
+            <div class="view-toggle">
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: viewMode === 'markdown' }"
+                @click="viewMode = 'markdown'"
+              >
+                Markdown
+              </button>
+              <button
+                type="button"
+                class="toggle-btn"
+                :class="{ active: viewMode === 'raw' }"
+                @click="viewMode = 'raw'"
+              >
+                原始文本
+              </button>
+            </div>
+          </div>
+          <div ref="reportBodyRef" v-if="viewMode === 'markdown'" class="markdown-body" v-html="renderedMarkdown"></div>
+          <pre ref="reportBodyRef" v-else class="raw-pre">{{ displayRawOutput }}</pre>
         </div>
 
         <div class="actions">
           <button
             type="button"
             class="btn secondary"
-            :disabled="saving"
+            :disabled="saving || loading"
             @click="saveResult"
           >
             {{ saving ? '保存中…' : '保存到数据库' }}
@@ -125,7 +210,8 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { marked } from 'marked'
 
 const form = reactive({
   model_url: '',
@@ -134,12 +220,47 @@ const form = reactive({
   output_tokens: 339,
   ttft_ms: 16.7,
   tpot_ms: 0.055,
+  content: '上海今天的天气怎么样？',
 })
 
 const loading = ref(false)
 const saving = ref(false)
 const result = ref(null)
+const streamingOutput = ref('')
 const error = ref(null)
+const viewMode = ref('markdown')
+
+const bestQpsForm = reactive({
+  ttft: 5,
+  tpot: 0.05,
+  qps_initial: 1,
+  max_iter: 20,
+})
+const bestQpsLoading = ref(false)
+const bestQpsProgress = ref(null)
+const bestQpsResult = ref(null)
+const bestQpsProgressPercent = computed(() => {
+  const p = bestQpsProgress.value
+  if (!p || !p.max_iter) return 0
+  return Math.round((p.iter / p.max_iter) * 100)
+})
+
+const displayRawOutput = computed(() => {
+  if (result.value?.raw_output) return result.value.raw_output
+  return streamingOutput.value || ''
+})
+
+const renderedMarkdown = computed(() => {
+  const raw = displayRawOutput.value
+  return marked.parse(raw)
+})
+
+const reportBodyRef = ref(null)
+watch(streamingOutput, () => {
+  nextTick(() => {
+    reportBodyRef.value?.scrollTo?.({ top: reportBodyRef.value.scrollHeight, behavior: 'smooth' })
+  })
+})
 
 const API_BASE = '/api'
 
@@ -147,19 +268,108 @@ async function runTest() {
   loading.value = true
   error.value = null
   result.value = null
+  streamingOutput.value = ''
   try {
-    const res = await fetch(`${API_BASE}/test`, {
+    const res = await fetch(`${API_BASE}/test/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || '请求失败')
-    result.value = data
+    if (!res.ok) throw new Error(`请求失败: ${res.status}`)
+    if (!res.body) throw new Error('不支持流式响应')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let accumulated = ''
+    let lineBuffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      const text = value ? decoder.decode(value, { stream: !done }) : ''
+      lineBuffer += text
+      const lines = lineBuffer.split('\n')
+      lineBuffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6).trim()
+          if (jsonStr === '[DONE]') continue
+          try {
+            const data = JSON.parse(jsonStr)
+            const chunk = data.chunk || ''
+            accumulated += chunk
+            streamingOutput.value = accumulated
+          } catch (_) {}
+        }
+      }
+      if (done) break
+    }
+
+    result.value = {
+      success: true,
+      raw_output: accumulated,
+      summary: null,
+    }
+  } catch (e) {
+    error.value = e.message || String(e)
+    result.value = { success: false, raw_output: streamingOutput.value, summary: null }
+  } finally {
+    loading.value = false
+  }
+}
+
+async function runFindBestQps() {
+  bestQpsLoading.value = true
+  bestQpsProgress.value = null
+  bestQpsResult.value = null
+  error.value = null
+  try {
+    const res = await fetch(`${API_BASE}/test/best-qps/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bestQpsForm),
+    })
+    if (!res.ok) throw new Error(`请求失败: ${res.status}`)
+    if (!res.body) throw new Error('不支持流式响应')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let lineBuffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      const text = value ? decoder.decode(value, { stream: !done }) : ''
+      lineBuffer += text
+      const lines = lineBuffer.split('\n')
+      lineBuffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6).trim()
+          try {
+            const data = JSON.parse(jsonStr)
+            if (data.type === 'progress') {
+              bestQpsProgress.value = data
+            } else if (data.type === 'done') {
+              bestQpsResult.value = {
+                best_qps: data.best_qps,
+                raw_output: data.raw_output || '',
+                history: data.history || [],
+              }
+            } else if (data.type === 'error') {
+              throw new Error(data.message || '未知错误')
+            }
+          } catch (e) {
+            if (e instanceof SyntaxError) continue
+            throw e
+          }
+        }
+      }
+      if (done) break
+    }
   } catch (e) {
     error.value = e.message || String(e)
   } finally {
-    loading.value = false
+    bestQpsLoading.value = false
+    bestQpsProgress.value = null
   }
 }
 
@@ -205,7 +415,7 @@ body {
   min-height: 100vh;
 }
 .app {
-  max-width: 720px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 2rem;
 }
@@ -243,6 +453,44 @@ body {
   font-size: 0.95rem;
   margin: 1rem 0 0.5rem;
   color: #8b949e;
+}
+.card-desc {
+  color: #8b949e;
+  font-size: 0.9rem;
+  margin: -0.5rem 0 1rem 0;
+}
+.progress-section {
+  margin-top: 1rem;
+}
+.progress-bar {
+  height: 8px;
+  background: #21262d;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: #238636;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.progress-message {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: #8b949e;
+}
+.best-qps-result {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #30363d;
+}
+.best-qps-result .raw-pre {
+  max-height: 300px;
+}
+.iter-count {
+  font-size: 0.9rem;
+  color: #8b949e;
+  margin: 0.25rem 0;
 }
 .form {
   display: flex;
@@ -307,6 +555,15 @@ body {
 .btn.secondary:hover:not(:disabled) {
   background: #30363d;
 }
+.streaming-badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  background: #1f6feb;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
 .success-badge {
   display: inline-block;
   padding: 0.25rem 0.6rem;
@@ -341,10 +598,85 @@ body {
   color: #8b949e;
   width: 40%;
 }
-.raw-output {
+.report-output {
   margin-top: 1rem;
 }
-.raw-output pre {
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.view-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+.toggle-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  background: #21262d;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.toggle-btn:hover {
+  color: #e6edf3;
+  border-color: #8b949e;
+}
+.toggle-btn.active {
+  background: #238636;
+  color: #fff;
+  border-color: #238636;
+}
+.markdown-body {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 1rem;
+  overflow: auto;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  max-height: 70vh;
+  margin: 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 1rem 0 0.5rem;
+  color: #58a6ff;
+}
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.1rem; }
+.markdown-body h3 { font-size: 1rem; }
+.markdown-body p { margin: 0.5rem 0; }
+.markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #30363d;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+.markdown-body th {
+  background: #21262d;
+  color: #8b949e;
+  font-weight: 600;
+}
+.markdown-body tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+.markdown-body hr { border: none; border-top: 1px solid #30363d; margin: 1rem 0; }
+.markdown-body code {
+  background: #21262d;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.markdown-body strong { color: #e6edf3; }
+.raw-pre {
   background: #0d1117;
   border: 1px solid #30363d;
   border-radius: 6px;
@@ -352,7 +684,7 @@ body {
   overflow: auto;
   font-size: 0.8rem;
   line-height: 1.5;
-  max-height: 320px;
+  max-height: 70vh;
   margin: 0;
 }
 .error-card .error-msg {

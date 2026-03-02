@@ -1,11 +1,15 @@
 """模型性能与精度压测后端 API。"""
+import asyncio
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from database import get_connection, init_db, list_results, save_result
 from parser import extract_metrics_for_db, parse_aiakperf_output
-from runner import run_aiakperf
+from runner import find_best_qps, run_aiakperf, run_aiakperf_shell, run_aiakperf_stream
 
 app = FastAPI(title="模型压测服务", version="1.0.0")
 
@@ -25,6 +29,46 @@ class TestRequest(BaseModel):
     output_tokens: int = Field(..., ge=1, description="输出 Token 长度")
     ttft_ms: float = Field(..., ge=0, description="TTFT (ms)")
     tpot_ms: float = Field(..., ge=0, description="TPOT (ms)")
+    content: str = Field(..., description="发送给 OpenClaw 的测试指令内容")
+
+
+class TestShellRequest(BaseModel):
+    """与 run_aiakperf 入参一致，用于 shell 执行。"""
+    tool: str = Field(default="aiakperf", description="测试工具")
+    model: str = Field(default="deepseek-r1-distill-qwen-32b", description="模型名")
+    api_address: str = Field(default="qianfan.baidubce.com", description="API 地址")
+    auth_header: str = Field(
+        default="bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826",
+        description="Authorization Bearer",
+    )
+    requestor: str = Field(default="qianfan_v2", description="请求方")
+    dataset: str = Field(default="raw_sharegpt", description="数据集")
+    n_value: str = Field(default="2", description="请求数")
+    if_value: str = Field(default="128", description="输入 token 长度")
+    of_value: str = Field(default="128", description="输出 token 长度")
+    qps_value: str = Field(default="1", description="QPS")
+    ttft_ms: float = Field(default=0.0, ge=0, description="TTFT (ms)")
+    tpot_ms: float = Field(default=0.0, ge=0, description="TPOT (ms)")
+    timeout: int = Field(default=600, ge=1, description="超时秒数")
+
+
+class FindBestQpsRequest(BaseModel):
+    """寻找最佳 QPS 的入参。"""
+    ttft: float = Field(default=5.0, ge=0, description="TTFT 约束 (秒)")
+    tpot: float = Field(default=0.05, ge=0, description="TPOT 约束 (秒)")
+    qps_initial: float = Field(default=1.0, gt=0, description="初始 QPS")
+    max_iter: int = Field(default=20, ge=1, le=50, description="最大迭代次数")
+    qps_tol: float = Field(default=0.05, ge=0, description="QPS 收敛精度")
+    tool: str = Field(default="aiakperf", description="测试工具")
+    model: str = Field(default="deepseek-r1-distill-qwen-32b", description="模型名")
+    api_address: str = Field(default="qianfan.baidubce.com", description="API 地址")
+    auth_header: str = Field(default="bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826")
+    requestor: str = Field(default="qianfan_v2")
+    dataset: str = Field(default="raw_sharegpt")
+    n_value: str = Field(default="10")
+    if_value: str = Field(default="128")
+    of_value: str = Field(default="128")
+    timeout: int = Field(default=600, ge=1)
 
 
 class StoreResultRequest(BaseModel):
@@ -49,9 +93,128 @@ def startup():
     init_db()
 
 
+async def _stream_sse():
+    """将 run_aiakperf_stream 的输出格式化为 SSE 流。"""
+    async for chunk in run_aiakperf_stream():
+        # SSE 格式: data: {json}\n\n，对内容做 JSON 转义
+        payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
+        yield f"data: {payload}\n\n"
+
+
+@app.post("/api/test/stream")
+async def run_test_stream():
+    """流式执行测试，实时返回模型输出（SSE）。"""
+    return StreamingResponse(
+        _stream_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _stream_find_best_qps(req: FindBestQpsRequest):
+    """将 find_best_qps 的进度与结果通过 SSE 推送。"""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def on_progress(data: dict):
+        await queue.put(data)
+
+    async def run():
+        try:
+            best_qps, raw_output, exit_code, history = await find_best_qps(
+                ttft=req.ttft,
+                tpot=req.tpot,
+                qps_initial=req.qps_initial,
+                max_iter=req.max_iter,
+                qps_tol=req.qps_tol,
+                tool=req.tool,
+                model=req.model,
+                api_address=req.api_address,
+                auth_header=req.auth_header,
+                requestor=req.requestor,
+                dataset=req.dataset,
+                n_value=req.n_value,
+                if_value=req.if_value,
+                of_value=req.of_value,
+                timeout=req.timeout,
+                progress_callback=on_progress,
+            )
+            await queue.put({
+                "type": "done",
+                "best_qps": best_qps,
+                "raw_output": raw_output,
+                "exit_code": exit_code,
+                "history": history,
+            })
+        except Exception as e:
+            await queue.put({"type": "error", "message": str(e)})
+
+    asyncio.create_task(run())
+
+    while True:
+        data = await queue.get()
+        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        if data.get("type") in ("done", "error"):
+            break
+
+
+@app.post("/api/test/best-qps/stream")
+async def run_find_best_qps_stream(req: FindBestQpsRequest):
+    """寻找最佳 QPS（SSE 推送进度与结果）。"""
+    return StreamingResponse(
+        _stream_find_best_qps(req),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/test/shell")
+async def run_test_shell(req: TestShellRequest):
+    """通过本地 shell 执行 aiakperf，返回测试回显。"""
+    raw_output, exit_code = await run_aiakperf_shell(
+        tool=req.tool,
+        model=req.model,
+        api_address=req.api_address,
+        auth_header=req.auth_header,
+        requestor=req.requestor,
+        dataset=req.dataset,
+        n_value=req.n_value,
+        if_value=req.if_value,
+        of_value=req.of_value,
+        qps_value=req.qps_value,
+        ttft_ms=req.ttft_ms,
+        tpot_ms=req.tpot_ms,
+        timeout=req.timeout,
+    )
+    parsed = parse_aiakperf_output(raw_output)
+    metrics = extract_metrics_for_db(parsed)
+    return {
+        "success": exit_code == 0,
+        "raw_output": raw_output,
+        "parsed_metrics": parsed,
+        "exit_code": exit_code,
+        "summary": {
+            "qps": metrics.get("qps"),
+            "mean_ttft": metrics.get("mean_ttft"),
+            "mean_tpot": metrics.get("mean_tpot"),
+            "total_time": metrics.get("total_time"),
+            "num_requests": metrics.get("num_requests"),
+            "num_succeed": metrics.get("num_succeed"),
+            "num_failed": metrics.get("num_failed"),
+        },
+    }
+
+
 @app.post("/api/test")
 async def run_test(req: TestRequest):
-    """执行模型性能测试，返回原始输出与解析后的指标。"""
+    """执行模型性能测试（当前通过 OpenClaw），返回原始输出与解析后的指标。"""
     if req.test_tool != "aiakperf":
         raise HTTPException(status_code=400, detail="当前仅支持测试工具: aiakperf")
     raw_output, exit_code = await run_aiakperf(
@@ -60,6 +223,7 @@ async def run_test(req: TestRequest):
         output_tokens=req.output_tokens,
         ttft_ms=req.ttft_ms,
         tpot_ms=req.tpot_ms,
+        content=req.content,
     )
     parsed = parse_aiakperf_output(raw_output)
     metrics = extract_metrics_for_db(parsed)
