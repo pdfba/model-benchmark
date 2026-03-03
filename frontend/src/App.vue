@@ -159,6 +159,58 @@
         <h2>错误</h2>
         <p class="error-msg">{{ error }}</p>
       </section>
+
+      <section class="card history-card">
+        <h2>历史记录</h2>
+        <p class="card-desc">已保存到数据库的压测结果，点击「刷新」获取最新列表</p>
+        <div class="actions">
+          <button
+            type="button"
+            class="btn secondary"
+            :disabled="historyLoading"
+            @click="loadHistory"
+          >
+            {{ historyLoading ? '加载中…' : '刷新' }}
+          </button>
+        </div>
+        <div v-if="historyList.length === 0 && !historyLoading" class="history-empty">
+          暂无记录，完成一次压测并点击「保存到数据库」后在此查看。
+        </div>
+        <div v-else class="history-wrap">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>模型地址</th>
+                <th>模型</th>
+                <th>工具</th>
+                <th>输入 Token</th>
+                <th>输出 Token</th>
+                <th>发包数量</th>
+                <th>成功数</th>
+                <th>QPS</th>
+                <th>Mean TTFT</th>
+                <th>Mean TPOT</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in historyList" :key="row.id">
+                <td>{{ formatHistoryTime(row.created_at) }}</td>
+                <td class="cell-url">{{ row.model_url }}</td>
+                <td class="cell-model">{{ row.model ?? '—' }}</td>
+                <td>{{ row.test_tool }}</td>
+                <td>{{ row.input_tokens ?? '—' }}</td>
+                <td>{{ row.output_tokens ?? '—' }}</td>
+                <td>{{ row.n_value ?? '—' }}</td>
+                <td>{{ row.num_succeed ?? '—' }}</td>
+                <td>{{ row.qps ?? '—' }}</td>
+                <td>{{ row.mean_ttft ?? '—' }}</td>
+                <td>{{ row.mean_tpot ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   </div>
 </template>
@@ -184,6 +236,8 @@ const saving = ref(false)
 const result = ref(null)
 const streamingOutput = ref('')
 const error = ref(null)
+const historyList = ref([])
+const historyLoading = ref(false)
 const displayRawOutput = computed(() => {
   if (result.value?.raw_output) return result.value.raw_output
   return streamingOutput.value || ''
@@ -210,7 +264,29 @@ onMounted(async () => {
   } catch {
     // 无 config.json 或解析失败时保持空
   }
+  loadHistory()
 })
+
+function formatHistoryTime(createdAt) {
+  if (!createdAt) return '—'
+  const s = String(createdAt)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16).replace('T', ' ')
+  return s
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    const res = await fetch(`${API_BASE}/results?limit=100`)
+    const data = await res.json()
+    if (res.ok) historyList.value = Array.isArray(data) ? data : []
+    else historyList.value = []
+  } catch {
+    historyList.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
 
 async function runTest() {
   if (form.n_value < 2) {
@@ -270,10 +346,10 @@ async function saveResult() {
       body: JSON.stringify({
         model_url: form.model_url,
         test_tool: form.test_tool,
+        model: form.model || '',
         input_tokens: form.input_tokens,
         output_tokens: form.output_tokens,
-        ttft_ms: result.value.summary?.mean_ttft ?? 0,
-        tpot_ms: result.value.summary?.mean_tpot ?? 0,
+        n_value: String(form.n_value),
         raw_output: result.value.raw_output || '',
         ...result.value.summary,
       }),
@@ -281,6 +357,7 @@ async function saveResult() {
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || '保存失败')
     alert('已保存到数据库')
+    loadHistory()
   } catch (e) {
     error.value = e.message || String(e)
   } finally {
@@ -547,5 +624,50 @@ body {
 .error-card .error-msg {
   color: #f85149;
   margin: 0;
+}
+.history-card .card-desc {
+  margin-bottom: 0.75rem;
+}
+.history-empty {
+  color: #8b949e;
+  font-size: 0.9rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+.history-wrap {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.history-table th,
+.history-table td {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #30363d;
+  text-align: left;
+}
+.history-table th {
+  background: #21262d;
+  color: #8b949e;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.history-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.history-table .cell-url {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-table .cell-model {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

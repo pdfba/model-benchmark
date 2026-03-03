@@ -73,10 +73,10 @@ class FindBestQpsRequest(BaseModel):
 class StoreResultRequest(BaseModel):
     model_url: str
     test_tool: str = "aiakperf"
+    model: str = ""
     input_tokens: int
     output_tokens: int
-    ttft_ms: float
-    tpot_ms: float
+    n_value: str = ""
     raw_output: str = ""
     qps: float | None = None
     mean_ttft: float | None = None
@@ -195,10 +195,10 @@ def store_result(req: StoreResultRequest):
     data = {
         "model_url": req.model_url,
         "test_tool": req.test_tool,
+        "model": req.model,
         "input_tokens": req.input_tokens,
         "output_tokens": req.output_tokens,
-        "ttft_ms": req.ttft_ms,
-        "tpot_ms": req.tpot_ms,
+        "n_value": req.n_value,
         "raw_output": req.raw_output,
         "qps": req.qps,
         "mean_ttft": req.mean_ttft,
