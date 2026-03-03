@@ -1,6 +1,7 @@
 """模型性能与精度压测后端 API。"""
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,14 @@ from pydantic import BaseModel, Field
 from database import get_connection, init_db, list_results, save_result
 from parser import extract_metrics_for_db, parse_aiakperf_output
 from runner import find_best_qps, run_aiakperf_shell
+
+# 从配置文件读取默认 API Key（不硬编码）
+_CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+try:
+    _config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+except Exception:
+    _config = {}
+DEFAULT_API_KEY: str = _config.get("default_api_key", "")
 
 app = FastAPI(title="模型压测服务", version="1.0.0")
 
@@ -28,8 +37,8 @@ class TestShellRequest(BaseModel):
     model: str = Field(default="deepseek-r1-distill-qwen-32b", description="模型名")
     api_address: str = Field(default="qianfan.baidubce.com", description="API 地址")
     auth_header: str = Field(
-        default="bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826",
-        description="Authorization Bearer",
+        default_factory=lambda: DEFAULT_API_KEY,
+        description="Authorization Bearer，默认从 backend/config.json 的 default_api_key 读取",
     )
     requestor: str = Field(default="qianfan_v2", description="请求方")
     dataset: str = Field(default="raw_sharegpt", description="数据集")
@@ -52,7 +61,7 @@ class FindBestQpsRequest(BaseModel):
     tool: str = Field(default="aiakperf", description="测试工具")
     model: str = Field(default="deepseek-r1-distill-qwen-32b", description="模型名")
     api_address: str = Field(default="qianfan.baidubce.com", description="API 地址")
-    auth_header: str = Field(default="bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826")
+    auth_header: str = Field(default_factory=lambda: DEFAULT_API_KEY)
     requestor: str = Field(default="qianfan_v2")
     dataset: str = Field(default="raw_sharegpt")
     n_value: str = Field(default="10")

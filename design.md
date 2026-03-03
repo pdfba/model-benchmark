@@ -78,7 +78,7 @@
 Openclaw通过执行本地的shell脚本进行测试。
 由于不同的测试工具，shell脚本会有所不同。
 对于aiakperf测试工具，qps模式的shell脚本为：
-aiakperf -m /root/DeepSeek-R1-Distill-Qwen-32B -a qianfan.baidubce.com/ -M deepseek-r1-distill-qwen-32b -H "Authorization: Bearer bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826" -r  qianfan_v2 -d raw_sharegpt -D /root/ShareGPT_V3_unfiltered_cleaned_split.json -n 10 -if 1024 -of 1024 -qps 3 -igr true >> aiak_test_1k_1k_2.log 2>&1 &
+aiakperf -m /root/DeepSeek-R1-Distill-Qwen-32B -a qianfan.baidubce.com/ -M deepseek-r1-distill-qwen-32b -H "Authorization: Bearer your api key" -r  qianfan_v2 -d raw_sharegpt -D /root/ShareGPT_V3_unfiltered_cleaned_split.json -n 10 -if 1024 -of 1024 -qps 3 -igr true >> aiak_test_1k_1k_2.log 2>&1 &
 测试脚本需要支持传入可变参数。
 在Openclaw调用本地shell脚本执行的过程中，需要把脚本的实时回显内容透出到前端界面供用户查看
 

@@ -32,6 +32,15 @@ npm run dev
 
 前端默认运行在 http://localhost:8173，开发环境下会代理 `/api` 到后端。
 
+### 3. API Key 配置（可选）
+
+模型服务 API Key 不再写死在代码中，可从配置文件读取默认值：
+
+- **后端**：在 `backend/config.json` 中设置 `default_api_key`。可复制 `backend/config.example.json` 为 `config.json` 后填写。若不存在或未填写，默认为空。
+- **前端**：在 `frontend/public/config.json` 中设置 `defaultApiKey`。可复制 `frontend/public/config.example.json` 为 `config.json` 后填写。页面加载时会请求 `/config.json` 并填充「模型服务 API Key」输入框。
+
+**注意**：若在配置文件中填写真实 Key，建议将 `config.json` 加入 `.gitignore` 以免误提交。
+
 **Linux 下若报错 `Cannot find module @rollup/rollup-linux-x64-gnu`**（npm 对可选依赖的 bug），在 `frontend` 目录执行：
 
 ```bash
@@ -46,7 +55,7 @@ npm install @rollup/rollup-linux-x64-gnu --save-optional
 npm install
 ```
 
-### 3. 使用说明
+### 4. 使用说明
 
 1. 在「测试配置」中填写：模型服务地址、测试工具（当前仅支持 aiakperf）、输入/输出 Token 长度、TTFT(ms)、TPOT(ms)。
 2. 点击「开始测试」，后端会执行压测并返回结果。

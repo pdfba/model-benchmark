@@ -164,11 +164,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 
 const form = reactive({
   model_url: 'qianfan.baidubce.com',
-  auth_header: 'bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826',
+  auth_header: '',
   model: 'deepseek-r1-distill-qwen-32b',
   test_tool: 'aiakperf',
   input_tokens: 64,
@@ -197,6 +197,20 @@ watch(streamingOutput, () => {
 })
 
 const API_BASE = '/api'
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/config.json')
+    if (res.ok) {
+      const data = await res.json()
+      if (data.defaultApiKey != null && data.defaultApiKey !== '') {
+        form.auth_header = String(data.defaultApiKey)
+      }
+    }
+  } catch {
+    // 无 config.json 或解析失败时保持空
+  }
+})
 
 async function runTest() {
   if (form.n_value < 2) {
