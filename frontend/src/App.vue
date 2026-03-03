@@ -10,24 +10,43 @@
         <h2>测试配置</h2>
         <form @submit.prevent="runTest" class="form">
           <div class="field">
-            <label for="model_url">模型服务地址</label>
+            <label for="model_url"><span class="required">*</span> 模型服务地址</label>
             <input
               id="model_url"
               v-model="form.model_url"
-              type="url"
-              placeholder="https://api.example.com/v1"
+              type="text"
+              placeholder="qianfan.baidubce.com"
               required
             />
           </div>
           <div class="field">
-            <label for="test_tool">测试工具</label>
+            <label for="auth_header">模型服务 API Key</label>
+            <input
+              id="auth_header"
+              v-model="form.auth_header"
+              type="text"
+              placeholder="选填，如 Bearer xxx"
+            />
+          </div>
+          <div class="field">
+            <label for="model"><span class="required">*</span> 模型</label>
+            <input
+              id="model"
+              v-model="form.model"
+              type="text"
+              placeholder="deepseek-r1-distill-qwen-32b"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="test_tool"><span class="required">*</span> 测试工具</label>
             <select id="test_tool" v-model="form.test_tool">
               <option value="aiakperf">aiakperf</option>
             </select>
           </div>
           <div class="row">
             <div class="field">
-              <label for="input_tokens">输入 Token 长度</label>
+              <label for="input_tokens"><span class="required">*</span> 输入 Token 长度</label>
               <input
                 id="input_tokens"
                 v-model.number="form.input_tokens"
@@ -37,7 +56,7 @@
               />
             </div>
             <div class="field">
-              <label for="output_tokens">输出 Token 长度</label>
+              <label for="output_tokens"><span class="required">*</span> 输出 Token 长度</label>
               <input
                 id="output_tokens"
                 v-model.number="form.output_tokens"
@@ -49,97 +68,51 @@
           </div>
           <div class="row">
             <div class="field">
-              <label for="ttft_ms">TTFT (ms)</label>
-              <input
-                id="ttft_ms"
-                v-model.number="form.ttft_ms"
-                type="number"
-                min="0"
-                step="0.1"
-                required
-              />
+              <label for="n_value"><span class="required">*</span> 发包数量</label>
+            <input
+              id="n_value"
+              v-model.number="form.n_value"
+              type="number"
+              min="2"
+              required
+              title="发包数量必须大于等于 2"
+            />
             </div>
             <div class="field">
-              <label for="tpot_ms">TPOT (ms)</label>
-              <input
-                id="tpot_ms"
-                v-model.number="form.tpot_ms"
-                type="number"
-                min="0"
-                step="0.01"
-                required
-              />
+              <label for="qps_value"><span class="required">*</span> 发包 QPS</label>
+            <input
+              id="qps_value"
+              v-model.number="form.qps_value"
+              type="number"
+              required
+            />
             </div>
           </div>
           <div class="field">
-            <label for="content">测试指令（发送给 OpenClaw 的内容）</label>
-            <textarea
-              id="content"
-              v-model="form.content"
-              rows="3"
-              placeholder="例如：上海今天的天气怎么样？"
-              required
-            ></textarea>
+            <label for="dataset">数据集</label>
+            <input
+              id="dataset"
+              v-model="form.dataset"
+              type="text"
+              placeholder="raw_sharegpt"
+            />
+          </div>
+          <div class="field">
+            <label for="requestor">发包接口类型</label>
+            <select id="requestor" v-model="form.requestor">
+              <option value="openai" title="openai 的 /v1/completions 接口">openai（/v1/completions）</option>
+              <option value="openai_chat" title="openai 的 /v1/chat/completions 接口">openai_chat（/v1/chat/completions）</option>
+              <option value="qianfan_v2" title="千帆 v2 接口">qianfan_v2（千帆 v2）</option>
+              <option value="sglang" title="sglang 的原生 /generate 接口">sglang（/generate）</option>
+              <option value="vllm" title="vllm 的原生 /generate 接口">vllm（/generate）</option>
+            </select>
           </div>
           <div class="actions">
             <button type="submit" class="btn primary" :disabled="loading">
-              {{ loading ? '测试中…' : '开始测试' }}
+              {{ loading ? '测试中…' : '单次性能测试' }}
             </button>
           </div>
         </form>
-      </section>
-
-      <section class="card best-qps-card">
-        <h2>寻找最佳 QPS</h2>
-        <p class="card-desc">在 TTFT/TPOT 约束下迭代搜索最大可满足 QPS</p>
-        <div class="row">
-          <div class="field">
-            <label>TTFT 约束 (秒)</label>
-            <input v-model.number="bestQpsForm.ttft" type="number" min="0" step="0.1" />
-          </div>
-          <div class="field">
-            <label>TPOT 约束 (秒)</label>
-            <input v-model.number="bestQpsForm.tpot" type="number" min="0" step="0.01" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label>初始 QPS</label>
-            <input v-model.number="bestQpsForm.qps_initial" type="number" min="0.01" step="0.1" />
-          </div>
-          <div class="field">
-            <label>最大迭代次数</label>
-            <input v-model.number="bestQpsForm.max_iter" type="number" min="1" max="50" />
-          </div>
-        </div>
-        <div class="actions">
-          <button
-            type="button"
-            class="btn primary"
-            :disabled="bestQpsLoading"
-            @click="runFindBestQps"
-          >
-            {{ bestQpsLoading ? '搜索中…' : '开始寻找最佳 QPS' }}
-          </button>
-        </div>
-        <div v-if="bestQpsLoading || bestQpsProgress" class="progress-section">
-          <div class="progress-bar">
-            <div
-              class="progress-fill"
-              :style="{ width: bestQpsProgressPercent + '%' }"
-            ></div>
-          </div>
-          <p class="progress-message">{{ bestQpsProgress?.message || '准备中…' }}</p>
-        </div>
-        <div v-if="bestQpsResult" class="best-qps-result">
-          <h3>结果</h3>
-          <p><strong>最佳 QPS：</strong>{{ bestQpsResult.best_qps?.toFixed(4) }}</p>
-          <p v-if="bestQpsResult.history?.length" class="iter-count">共 {{ bestQpsResult.history.length }} 次迭代</p>
-          <div class="report-output">
-            <h3>最后一次回显</h3>
-            <pre class="raw-pre">{{ bestQpsResult.raw_output }}</pre>
-          </div>
-        </div>
       </section>
 
       <section v-if="streamingOutput !== null || result" class="card result-card">
@@ -166,27 +139,8 @@
         <div class="report-output">
           <div class="report-header">
             <h3>测试报告</h3>
-            <div class="view-toggle">
-              <button
-                type="button"
-                class="toggle-btn"
-                :class="{ active: viewMode === 'markdown' }"
-                @click="viewMode = 'markdown'"
-              >
-                Markdown
-              </button>
-              <button
-                type="button"
-                class="toggle-btn"
-                :class="{ active: viewMode === 'raw' }"
-                @click="viewMode = 'raw'"
-              >
-                原始文本
-              </button>
-            </div>
           </div>
-          <div ref="reportBodyRef" v-if="viewMode === 'markdown'" class="markdown-body" v-html="renderedMarkdown"></div>
-          <pre ref="reportBodyRef" v-else class="raw-pre">{{ displayRawOutput }}</pre>
+          <pre ref="reportBodyRef" class="raw-pre">{{ displayRawOutput }}</pre>
         </div>
 
         <div class="actions">
@@ -211,16 +165,18 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
-import { marked } from 'marked'
 
 const form = reactive({
-  model_url: '',
+  model_url: 'qianfan.baidubce.com',
+  auth_header: 'bce-v3/ALTAK-SnSg71JuaUo1u3OxA2YRo/6d0bd73d1c44da875f0690b221b1baf4cb4e5826',
+  model: 'deepseek-r1-distill-qwen-32b',
   test_tool: 'aiakperf',
-  input_tokens: 16384,
-  output_tokens: 339,
-  ttft_ms: 16.7,
-  tpot_ms: 0.055,
-  content: '上海今天的天气怎么样？',
+  input_tokens: 64,
+  output_tokens: 64,
+  n_value: 2,
+  qps_value: 1,
+  dataset: 'raw_sharegpt',
+  requestor: 'qianfan_v2',
 })
 
 const loading = ref(false)
@@ -228,31 +184,9 @@ const saving = ref(false)
 const result = ref(null)
 const streamingOutput = ref('')
 const error = ref(null)
-const viewMode = ref('markdown')
-
-const bestQpsForm = reactive({
-  ttft: 5,
-  tpot: 0.05,
-  qps_initial: 1,
-  max_iter: 20,
-})
-const bestQpsLoading = ref(false)
-const bestQpsProgress = ref(null)
-const bestQpsResult = ref(null)
-const bestQpsProgressPercent = computed(() => {
-  const p = bestQpsProgress.value
-  if (!p || !p.max_iter) return 0
-  return Math.round((p.iter / p.max_iter) * 100)
-})
-
 const displayRawOutput = computed(() => {
   if (result.value?.raw_output) return result.value.raw_output
   return streamingOutput.value || ''
-})
-
-const renderedMarkdown = computed(() => {
-  const raw = displayRawOutput.value
-  return marked.parse(raw)
 })
 
 const reportBodyRef = ref(null)
@@ -265,111 +199,49 @@ watch(streamingOutput, () => {
 const API_BASE = '/api'
 
 async function runTest() {
+  if (form.n_value < 2) {
+    error.value = '发包数量必须大于等于 2'
+    return
+  }
   loading.value = true
   error.value = null
   result.value = null
   streamingOutput.value = ''
   try {
-    const res = await fetch(`${API_BASE}/test/stream`, {
+    const body = {
+      tool: form.test_tool,
+      model: form.model || undefined,
+      api_address: form.model_url || undefined,
+      auth_header: form.auth_header || undefined,
+      if_value: String(form.input_tokens),
+      of_value: String(form.output_tokens),
+      n_value: String(form.n_value),
+      qps_value: String(form.qps_value),
+      dataset: form.dataset || undefined,
+      requestor: form.requestor || undefined,
+    }
+    const res = await fetch(`${API_BASE}/test/shell`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`请求失败: ${res.status}`)
-    if (!res.body) throw new Error('不支持流式响应')
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let accumulated = ''
-    let lineBuffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      const text = value ? decoder.decode(value, { stream: !done }) : ''
-      lineBuffer += text
-      const lines = lineBuffer.split('\n')
-      lineBuffer = lines.pop() || ''
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim()
-          if (jsonStr === '[DONE]') continue
-          try {
-            const data = JSON.parse(jsonStr)
-            const chunk = data.chunk || ''
-            accumulated += chunk
-            streamingOutput.value = accumulated
-          } catch (_) {}
-        }
-      }
-      if (done) break
+    const text = await res.text()
+    if (!text) {
+      throw new Error('服务器未返回数据，可能请求超时或服务异常，请检查后端是否正常运行')
     }
-
-    result.value = {
-      success: true,
-      raw_output: accumulated,
-      summary: null,
+    let data
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error('响应格式错误: ' + text.slice(0, 200))
     }
+    if (!res.ok) throw new Error(data.detail || data.message || `请求失败: ${res.status}`)
+    result.value = data
   } catch (e) {
     error.value = e.message || String(e)
-    result.value = { success: false, raw_output: streamingOutput.value, summary: null }
+    result.value = { success: false, raw_output: '', summary: null }
   } finally {
     loading.value = false
-  }
-}
-
-async function runFindBestQps() {
-  bestQpsLoading.value = true
-  bestQpsProgress.value = null
-  bestQpsResult.value = null
-  error.value = null
-  try {
-    const res = await fetch(`${API_BASE}/test/best-qps/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bestQpsForm),
-    })
-    if (!res.ok) throw new Error(`请求失败: ${res.status}`)
-    if (!res.body) throw new Error('不支持流式响应')
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let lineBuffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      const text = value ? decoder.decode(value, { stream: !done }) : ''
-      lineBuffer += text
-      const lines = lineBuffer.split('\n')
-      lineBuffer = lines.pop() || ''
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim()
-          try {
-            const data = JSON.parse(jsonStr)
-            if (data.type === 'progress') {
-              bestQpsProgress.value = data
-            } else if (data.type === 'done') {
-              bestQpsResult.value = {
-                best_qps: data.best_qps,
-                raw_output: data.raw_output || '',
-                history: data.history || [],
-              }
-            } else if (data.type === 'error') {
-              throw new Error(data.message || '未知错误')
-            }
-          } catch (e) {
-            if (e instanceof SyntaxError) continue
-            throw e
-          }
-        }
-      }
-      if (done) break
-    }
-  } catch (e) {
-    error.value = e.message || String(e)
-  } finally {
-    bestQpsLoading.value = false
-    bestQpsProgress.value = null
   }
 }
 
@@ -386,8 +258,8 @@ async function saveResult() {
         test_tool: form.test_tool,
         input_tokens: form.input_tokens,
         output_tokens: form.output_tokens,
-        ttft_ms: form.ttft_ms,
-        tpot_ms: form.tpot_ms,
+        ttft_ms: result.value.summary?.mean_ttft ?? 0,
+        tpot_ms: result.value.summary?.mean_tpot ?? 0,
         raw_output: result.value.raw_output || '',
         ...result.value.summary,
       }),
@@ -459,39 +331,6 @@ body {
   font-size: 0.9rem;
   margin: -0.5rem 0 1rem 0;
 }
-.progress-section {
-  margin-top: 1rem;
-}
-.progress-bar {
-  height: 8px;
-  background: #21262d;
-  border-radius: 4px;
-  overflow: hidden;
-}
-.progress-fill {
-  height: 100%;
-  background: #238636;
-  border-radius: 4px;
-  transition: width 0.3s ease;
-}
-.progress-message {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-  color: #8b949e;
-}
-.best-qps-result {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #30363d;
-}
-.best-qps-result .raw-pre {
-  max-height: 300px;
-}
-.iter-count {
-  font-size: 0.9rem;
-  color: #8b949e;
-  margin: 0.25rem 0;
-}
 .form {
   display: flex;
   flex-direction: column;
@@ -505,6 +344,10 @@ body {
 .field label {
   font-size: 0.85rem;
   color: #8b949e;
+}
+.field label .required {
+  color: #f85149;
+  margin-right: 0.15em;
 }
 .field input,
 .field select {

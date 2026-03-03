@@ -20,7 +20,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-服务默认运行在 http://127.0.0.1:8000
+服务默认运行在 http://127.0.0.1:8900
 
 ### 2. 前端
 
@@ -30,7 +30,21 @@ npm install
 npm run dev
 ```
 
-前端默认运行在 http://localhost:5173，开发环境下会代理 `/api` 到后端。
+前端默认运行在 http://localhost:8173，开发环境下会代理 `/api` 到后端。
+
+**Linux 下若报错 `Cannot find module @rollup/rollup-linux-x64-gnu`**（npm 对可选依赖的 bug），在 `frontend` 目录执行：
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+若仍失败，可先显式安装当前平台的原生包再装依赖：
+
+```bash
+npm install @rollup/rollup-linux-x64-gnu --save-optional
+npm install
+```
 
 ### 3. 使用说明
 

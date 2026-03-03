@@ -361,33 +361,19 @@ async def run_aiakperf_shell(
 if __name__ == "__main__":
     import asyncio
 
-'''
+    # 仅在本文件直接运行（python3 runner.py）时执行，被 main.py 导入时不会执行
     best_qps, raw, code, history = asyncio.run(find_best_qps(
-    ttft=5.0,
-    tpot=0.05,
-    qps_initial=3.0,
-    tool="aiakperf",
-    model="Qwen3-235B-A22B-Instruct-2507-Int8-Dynamic",
-    api_address="180.76.233.120:8978",
-    requestor="openai",
-    dataset="raw_sharegpt",
-    if_value="128",
-    of_value="128",
+        ttft=5.0,
+        tpot=0.05,
+        qps_initial=0.1,
+        tool="aiakperf",
+        model="deepseek-r1-distill-qwen-32b",
+        api_address="qianfan.baidubce.com",
+        requestor="qianfan_v2",
+        dataset="raw_sharegpt",
+        if_value="128",
+        of_value="128",
+        max_iter=1,
+        auth_header="your-owner-sk",
     ))
-'''
-best_qps, raw, code, history = asyncio.run(find_best_qps(
-    ttft=5.0,
-    tpot=0.05,
-    qps_initial=0.1,
-    tool="aiakperf",
-    model="deepseek-r1-distill-qwen-32b",
-    api_address="qianfan.baidubce.com",
-    requestor="qianfan_v2",
-    dataset="raw_sharegpt",
-    if_value="128",
-    of_value="128",
-    max_iter= 1,
-    auth_header = "your-owner-sk",
-    ))
-
-show_perf_result((raw, code))
+    show_perf_result((raw, code))
